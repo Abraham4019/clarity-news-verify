@@ -17,7 +17,8 @@
         timestamp: uint,
         verified: bool,
         verifier-count: uint,
-        reputation-score: uint
+        reputation-score: uint,
+        weighted-score: uint
     }
 )
 
@@ -64,6 +65,10 @@
     )
 )
 
+(define-private (calculate-weighted-score (rep-score uint) (verifier-count uint))
+    (* rep-score (+ u1 (/ verifier-count u2)))
+)
+
 ;; Public functions
 (define-public (publish-news (content-hash (buff 32)))
     (let 
@@ -80,7 +85,8 @@
                 timestamp: block-height,
                 verified: false,
                 verifier-count: u0,
-                reputation-score: u0
+                reputation-score: u0,
+                weighted-score: u0
             }
         )
         (map-set user-reputation
@@ -113,13 +119,15 @@
             (
                 (new-count (+ current-verifications u1))
                 (verified (>= new-count u3))
+                (new-rep-score (+ (get reputation-score news-item) (get score verifier-rep)))
             )
             (map-set news-items
                 { news-id: news-id }
                 (merge news-item { 
                     verifier-count: new-count,
                     verified: verified,
-                    reputation-score: (+ (get reputation-score news-item) (get score verifier-rep))
+                    reputation-score: new-rep-score,
+                    weighted-score: (calculate-weighted-score new-rep-score new-count)
                 })
             )
             (when verified
@@ -151,4 +159,11 @@
 
 (define-read-only (get-reputation (user principal))
     (ok (get-user-reputation user))
+)
+
+(define-read-only (get-weighted-score (news-id uint))
+    (match (get-news-item news-id)
+        news-item (ok (get weighted-score news-item))
+        err-not-found
+    )
 )
