@@ -12,6 +12,7 @@ A blockchain-based system for verifying news authenticity using collective valid
 - Reputation system for publishers and verifiers
 - Minimum reputation thresholds for publishing and verifying
 - Dynamic reputation scoring based on verified content
+- Weighted reputation scoring based on verification count
 
 ## How it works
 
@@ -23,6 +24,7 @@ A blockchain-based system for verifying news authenticity using collective valid
 6. Successful verifications increase publisher reputation
 7. All verification history is permanently stored on the blockchain
 8. Reputation scores determine user privileges and influence
+9. News items get weighted reputation scores based on verifier count
 
 ## Reputation System
 
@@ -32,3 +34,10 @@ A blockchain-based system for verifying news authenticity using collective valid
 - Verified news items increase publisher reputation by 5
 - Failed verifications decrease reputation by 3
 - Higher reputation gives more influence in verification process
+- Weighted scoring formula: reputation_score * (1 + verifier_count/2)
+
+## Recent Updates
+
+- Added weighted reputation scoring that increases with more verifications
+- New weighted-score field for news items that combines reputation and verification count
+- Added get-weighted-score read-only function to query weighted reputation scores
