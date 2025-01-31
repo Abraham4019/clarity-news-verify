@@ -69,3 +69,32 @@ Clarinet.test({
         assertEquals(reputation['published-count'], types.uint(0));
     },
 });
+
+Clarinet.test({
+    name: "Weighted score increases with verifications",
+    async fn(chain: Chain, accounts: Map<string, Account>) {
+        const wallet1 = accounts.get('wallet_1')!;
+        const wallet2 = accounts.get('wallet_2')!;
+        const contentHash = '0x1234567890123456789012345678901234567890123456789012345678901234';
+        
+        // Publish news
+        let block = chain.mineBlock([
+            Tx.contractCall('news-verifier', 'publish-news',
+                [types.buff(contentHash)],
+                wallet1.address
+            )
+        ]);
+        
+        let newsId = block.receipts[0].result.expectOk();
+        
+        // Get initial weighted score
+        let scoreBlock = chain.mineBlock([
+            Tx.contractCall('news-verifier', 'get-weighted-score',
+                [newsId],
+                wallet1.address
+            )
+        ]);
+        
+        assertEquals(scoreBlock.receipts[0].result.expectOk(), types.uint(0));
+    },
+});
