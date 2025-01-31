@@ -8,7 +8,7 @@ import {
 import { assertEquals } from 'https://deno.land/std@0.90.0/testing/asserts.ts';
 
 Clarinet.test({
-    name: "Can publish news and get correct news ID",
+    name: "Can publish news with sufficient reputation",
     async fn(chain: Chain, accounts: Map<string, Account>) {
         const wallet1 = accounts.get('wallet_1')!;
         const contentHash = '0x1234567890123456789012345678901234567890123456789012345678901234';
@@ -25,7 +25,7 @@ Clarinet.test({
 });
 
 Clarinet.test({
-    name: "Can verify news and track verifications",
+    name: "Cannot verify without sufficient reputation",
     async fn(chain: Chain, accounts: Map<string, Account>) {
         const wallet1 = accounts.get('wallet_1')!;
         const wallet2 = accounts.get('wallet_2')!;
@@ -39,7 +39,7 @@ Clarinet.test({
             )
         ]);
         
-        // Then verify it
+        // Attempt verification with insufficient reputation
         let verifyBlock = chain.mineBlock([
             Tx.contractCall('news-verifier', 'verify-news',
                 [types.uint(0)],
@@ -47,16 +47,25 @@ Clarinet.test({
             )
         ]);
         
-        verifyBlock.receipts[0].result.expectOk();
+        assertEquals(verifyBlock.receipts[0].result.expectErr(), types.uint(104));
+    },
+});
+
+Clarinet.test({
+    name: "Can check user reputation",
+    async fn(chain: Chain, accounts: Map<string, Account>) {
+        const wallet1 = accounts.get('wallet_1')!;
         
-        // Check verification status
-        let statusBlock = chain.mineBlock([
-            Tx.contractCall('news-verifier', 'is-news-verified',
-                [types.uint(0)],
+        let block = chain.mineBlock([
+            Tx.contractCall('news-verifier', 'get-reputation',
+                [types.principal(wallet1.address)],
                 wallet1.address
             )
         ]);
         
-        statusBlock.receipts[0].result.expectOk().assertEquals(false); // Needs 3 verifications
+        const reputation = block.receipts[0].result.expectOk().expectTuple();
+        assertEquals(reputation['score'], types.uint(10));
+        assertEquals(reputation['verified-count'], types.uint(0));
+        assertEquals(reputation['published-count'], types.uint(0));
     },
 });
