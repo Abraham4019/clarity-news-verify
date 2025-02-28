@@ -7,6 +7,18 @@
 (define-constant err-not-found (err u102))
 (define-constant err-not-verified (err u103))
 (define-constant err-insufficient-reputation (err u104))
+(define-constant err-invalid-timestamp (err u105))
+(define-constant err-contract-paused (err u106))
+(define-constant err-reputation-overflow (err u107))
+
+;; Configuration
+(define-constant max-reputation u1000)
+(define-constant min-reputation u0)
+(define-constant verification-window u144) ;; ~24 hours in blocks
+
+;; Data variables
+(define-data-var next-id uint u0)
+(define-data-var contract-paused bool false)
 
 ;; Data structures
 (define-map news-items
@@ -32,17 +44,23 @@
     { 
         score: uint,
         verified-count: uint,
-        published-count: uint
+        published-count: uint,
+        last-activity: uint
     }
 )
 
-;; Data variables
-(define-data-var next-id uint u0)
+;; Admin functions
+(define-public (set-contract-pause (paused bool))
+    (begin
+        (asserts! (is-eq tx-sender contract-owner) err-owner-only)
+        (ok (var-set contract-paused paused))
+    )
+)
 
 ;; Private functions 
 (define-private (get-user-reputation (user principal))
     (default-to
-        { score: u10, verified-count: u0, published-count: u0 }
+        { score: u10, verified-count: u0, published-count: u0, last-activity: block-height }
         (map-get? user-reputation { user: user })
     )
 )
@@ -52,118 +70,64 @@
         (
             (current-rep (get-user-reputation user))
             (new-score (if verified 
-                (+ (get score current-rep) u5)
-                (- (get score current-rep) u3)))
+                (min max-reputation (+ (get score current-rep) u5))
+                (max min-reputation (- (get score current-rep) u3))))
         )
         (map-set user-reputation
             { user: user }
             (merge current-rep {
                 score: new-score,
-                verified-count: (+ (get verified-count current-rep) u1)
+                verified-count: (+ (get verified-count current-rep) u1),
+                last-activity: block-height
             })
         )
     )
 )
 
 (define-private (calculate-weighted-score (rep-score uint) (verifier-count uint))
-    (* rep-score (+ u1 (/ verifier-count u2)))
+    (min max-reputation (* rep-score (+ u1 (/ verifier-count u2))))
+)
+
+(define-private (validate-timestamp (timestamp uint))
+    (and 
+        (>= timestamp (- block-height verification-window))
+        (<= timestamp block-height)
+    )
 )
 
 ;; Public functions
 (define-public (publish-news (content-hash (buff 32)))
-    (let 
-        (
-            (news-id (var-get next-id))
-            (publisher-rep (get-user-reputation tx-sender))
-        )
-        (asserts! (>= (get score publisher-rep) u10) err-insufficient-reputation)
-        (map-set news-items
-            { news-id: news-id }
-            {
-                publisher: tx-sender,
-                content-hash: content-hash, 
-                timestamp: block-height,
-                verified: false,
-                verifier-count: u0,
-                reputation-score: u0,
-                weighted-score: u0
-            }
-        )
-        (map-set user-reputation
-            { user: tx-sender }
-            (merge publisher-rep {
-                published-count: (+ (get published-count publisher-rep) u1)
-            })
-        )
-        (var-set next-id (+ news-id u1))
-        (ok news-id)
-    )
-)
-
-(define-public (verify-news (news-id uint))
-    (let 
-        (
-            (news-item (unwrap! (get-news-item news-id) err-not-found))
-            (current-verifications (default-to u0 (get verifier-count news-item)))
-            (verifier-rep (get-user-reputation tx-sender))
-        )
-        (asserts! (>= (get score verifier-rep) u20) err-insufficient-reputation)
-        (asserts! (not (already-verified news-id tx-sender)) err-already-verified)
-        
-        (map-set verifications
-            { news-id: news-id, verifier: tx-sender }
-            { verified: true }
-        )
-        
-        (let
+    (begin
+        (asserts! (not (var-get contract-paused)) err-contract-paused)
+        (let 
             (
-                (new-count (+ current-verifications u1))
-                (verified (>= new-count u3))
-                (new-rep-score (+ (get reputation-score news-item) (get score verifier-rep)))
+                (news-id (var-get next-id))
+                (publisher-rep (get-user-reputation tx-sender))
             )
+            (asserts! (>= (get score publisher-rep) u10) err-insufficient-reputation)
             (map-set news-items
                 { news-id: news-id }
-                (merge news-item { 
-                    verifier-count: new-count,
-                    verified: verified,
-                    reputation-score: new-rep-score,
-                    weighted-score: (calculate-weighted-score new-rep-score new-count)
+                {
+                    publisher: tx-sender,
+                    content-hash: content-hash, 
+                    timestamp: block-height,
+                    verified: false,
+                    verifier-count: u0,
+                    reputation-score: u0,
+                    weighted-score: u0
+                }
+            )
+            (map-set user-reputation
+                { user: tx-sender }
+                (merge publisher-rep {
+                    published-count: (+ (get published-count publisher-rep) u1),
+                    last-activity: block-height
                 })
             )
-            (when verified
-                (update-reputation (get publisher news-item) true)
-            )
-            (ok true)
+            (var-set next-id (+ news-id u1))
+            (ok news-id)
         )
     )
 )
 
-;; Read-only functions
-(define-read-only (get-news-item (news-id uint))
-    (map-get? news-items { news-id: news-id })
-)
-
-(define-read-only (is-news-verified (news-id uint))
-    (match (get-news-item news-id)
-        news-item (ok (get verified news-item))
-        err-not-found
-    )
-)
-
-(define-read-only (already-verified (news-id uint) (verifier principal))
-    (match (map-get? verifications { news-id: news-id, verifier: verifier })
-        verification-data (get verified verification-data)
-        false
-    )
-)
-
-(define-read-only (get-reputation (user principal))
-    (ok (get-user-reputation user))
-)
-
-(define-read-only (get-weighted-score (news-id uint))
-    (match (get-news-item news-id)
-        news-item (ok (get weighted-score news-item))
-        err-not-found
-    )
-)
+[... remaining contract functions ...]
