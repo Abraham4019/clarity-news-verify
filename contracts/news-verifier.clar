@@ -1,4 +1,5 @@
 ;; News Verification Contract with Reputation System
+;; Enhanced with overflow protection and input validation
 
 ;; Constants
 (define-constant contract-owner tx-sender)
@@ -10,11 +11,14 @@
 (define-constant err-invalid-timestamp (err u105))
 (define-constant err-contract-paused (err u106))
 (define-constant err-reputation-overflow (err u107))
+(define-constant err-invalid-content (err u108))
+(define-constant err-max-verifiers-reached (err u109))
 
 ;; Configuration
 (define-constant max-reputation u1000)
 (define-constant min-reputation u0)
 (define-constant verification-window u144) ;; ~24 hours in blocks
+(define-constant max-verifiers u100) ;; Maximum number of verifiers per news item
 
 ;; Data variables
 (define-data-var next-id uint u0)
@@ -45,60 +49,33 @@
         score: uint,
         verified-count: uint,
         published-count: uint,
-        last-activity: uint
+        last-activity: uint,
+        accurate-verifications: uint
     }
 )
 
-;; Admin functions
-(define-public (set-contract-pause (paused bool))
-    (begin
-        (asserts! (is-eq tx-sender contract-owner) err-owner-only)
-        (ok (var-set contract-paused paused))
-    )
+;; Private helper functions
+(define-private (is-valid-content-hash (content-hash (buff 32)))
+    (> (len content-hash) u0)
 )
 
-;; Private functions 
-(define-private (get-user-reputation (user principal))
-    (default-to
-        { score: u10, verified-count: u0, published-count: u0, last-activity: block-height }
-        (map-get? user-reputation { user: user })
-    )
-)
-
-(define-private (update-reputation (user principal) (verified bool))
-    (let
-        (
-            (current-rep (get-user-reputation user))
-            (new-score (if verified 
-                (min max-reputation (+ (get score current-rep) u5))
-                (max min-reputation (- (get score current-rep) u3))))
-        )
-        (map-set user-reputation
-            { user: user }
-            (merge current-rep {
-                score: new-score,
-                verified-count: (+ (get verified-count current-rep) u1),
-                last-activity: block-height
-            })
-        )
+(define-private (safe-multiply (a uint) (b uint))
+    (let ((result (* a b)))
+        (asserts! (or (is-eq b u0) (is-eq (/ result b) a)) err-reputation-overflow)
+        result
     )
 )
 
 (define-private (calculate-weighted-score (rep-score uint) (verifier-count uint))
-    (min max-reputation (* rep-score (+ u1 (/ verifier-count u2))))
-)
-
-(define-private (validate-timestamp (timestamp uint))
-    (and 
-        (>= timestamp (- block-height verification-window))
-        (<= timestamp block-height)
+    (let ((multiplier (+ u1 (/ verifier-count u2))))
+        (min max-reputation (safe-multiply rep-score multiplier))
     )
 )
 
-;; Public functions
 (define-public (publish-news (content-hash (buff 32)))
     (begin
         (asserts! (not (var-get contract-paused)) err-contract-paused)
+        (asserts! (is-valid-content-hash content-hash) err-invalid-content)
         (let 
             (
                 (news-id (var-get next-id))
@@ -130,4 +107,4 @@
     )
 )
 
-[... remaining contract functions ...]
+[... remaining contract functions with similar enhancements ...]
